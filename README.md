@@ -5,7 +5,7 @@ on this project to your server needs.
 
 ### performance.
 
-- `wrk -t8 -c500 -d30s "http://127.0.0.1:3000/"```:
+- `wrk -t8 -c500 -d30s "http://127.0.0.1:3000/"`:
   - 15654.47 requests/sec or about 1,352,546,208
   requests/day (yeah, a billion/day is a lot haha!)
   - 63.25MB read
