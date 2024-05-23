@@ -19,14 +19,14 @@ struct RequestState {
     request_buffer: [u8; 1024],
 }
 struct AppState {
-    status_code_response_map: HashMap<u16, &'static str>,
+    code_map: HashMap<u16, &'static str>,
     routes: PathHandlerMap,
     request_state: RequestState,
 }
 
 fn main() {
     // constants initialization
-    let status_code_response_map: HashMap<u16, &'static str> = HashMap::from([
+    let code_map: HashMap<u16, &'static str> = HashMap::from([
         (200, "OK"),
         (201, "Created"),
         (204, "No Content"),
@@ -37,6 +37,8 @@ fn main() {
         (405, "Method Not Allowed"),
         (500, "Internal Server Error"),
     ]);
+
+    // define routes and their handlers
     let routes = Arc::new(HashMap::from([(
         "/",
         PathProperties {
@@ -51,9 +53,10 @@ fn main() {
     // handle incoming connections
     let thread_pool = thread::spawn(move || {
         for stream in server.incoming() {
+            // if the stream is valid, spawn a new thread to handle the request
             if let Some(stream) = stream.ok() {
                 let mut state = AppState {
-                    status_code_response_map: status_code_response_map.clone(),
+                    code_map: code_map.clone(),
                     routes: routes.clone(),
                     request_state: RequestState {
                         conn_stream: stream,
@@ -61,17 +64,19 @@ fn main() {
                     },
                 };
                 thread::spawn(move || {
-                    state
+                    // read request to buffer
+                    let read_stream_result = state
                         .request_state
                         .conn_stream
-                        .read(&mut state.request_state.request_buffer)
-                        .unwrap();
+                        .read(&mut state.request_state.request_buffer);
+                    if read_stream_result.is_err() {
+                        return_response(state, 500, None, None);
+                        return;
+                    }
 
-                    // ["POST / HTTP/1.1", "Host: 127.0.0.1:3000", "User-Agent: curl/7.88.1", "Accept: */*", "Content-Length: 17", "Content-Type: application/x-www-form-urlencoded", "", "{'field': 'data'}"]
+                    // parse request
                     let request = String::from_utf8_lossy(&state.request_state.request_buffer[..]);
                     let request_lines: Vec<&str> = request.trim().split("\r\n").collect();
-
-                    // parse info
                     let request_info = request_lines[0].split_whitespace().collect::<Vec<&str>>();
                     if request_info.len() != 3 {
                         return_response(state, 400, None, None);
@@ -79,16 +84,15 @@ fn main() {
                     }
 
                     // parse headers.
-                    let headers = request_lines
+                    let headers: HashMap<&str, &str> = request_lines
                         .iter()
                         .skip(1)
                         .take_while(|line| !line.is_empty())
-                        .collect::<Vec<&&str>>()
-                        .pop();
-                    if headers.is_none() {
-                        return_response(state, 400, None, None);
-                        return;
-                    }
+                        .map(|line| {
+                            let mut parts = line.split(": ");
+                            (parts.next().unwrap(), parts.next().unwrap())
+                        })
+                        .collect::<HashMap<&str, &str>>();
 
                     // parse body.
                     // let body = request_lines.last();
@@ -130,7 +134,7 @@ fn return_response(
     let response = format!(
         "HTTP/1.1 {} {}\n{}\r\n\r\n{}",
         code,
-        state.status_code_response_map.get(&code).unwrap(),
+        state.code_map.get(&code).unwrap(),
         {
             let mut headers = headers.unwrap_or(HashMap::new());
             if !headers.contains_key("Content-Type") {
